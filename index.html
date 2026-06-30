@@ -720,6 +720,7 @@
       <nav class="nav">
         <button class="active" data-tab="seguimientoView">Seguimiento Alonso <span class="pill" id="navAlonso">0</span></button>
         <button data-tab="solicitudesView">Solicitudes CrystalKind <span class="pill" id="navSolicitudes">0</span></button>
+        <button data-tab="kardexView">Kardex / Movimientos <span class="pill" id="navKardex">0</span></button>
         <button data-tab="guiasView">Generar guía <span class="pill" id="navSeleccionadas">0</span></button>
       </nav>
 
@@ -824,6 +825,8 @@
             <button class="primary" id="goGuideBtn">Ver guía seleccionada</button>
             <button class="secondary" id="selectAlertBtn">Seleccionar alertas rojas</button>
             <button class="secondary" id="clearSelectionBtn">Quitar selección</button>
+            <button class="danger" id="returnSelectedBtn">Registrar retorno Alonso</button>
+            <button class="secondary" id="clientSelectedBtn">Salida a clienta</button>
           </div>
           <div class="tableWrap">
             <table>
@@ -848,6 +851,67 @@
               </thead>
               <tbody id="requestTableBody"></tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+
+      <section class="tabView" id="kardexView">
+        <div class="grid">
+          <div class="card">
+            <div class="cardHead">
+              <h3>Kardex de movimientos</h3>
+              <span class="muted" id="kardexCount">—</span>
+            </div>
+
+            <div class="kpis" style="grid-template-columns:repeat(5,minmax(120px,1fr));">
+              <div class="kpi blue"><label>Salidas Alonso</label><strong id="kdxSalidaAlonso">0</strong><span>Piezas enviadas</span></div>
+              <div class="kpi green"><label>Retornos Alonso</label><strong id="kdxRetornoAlonso">0</strong><span>Piezas devueltas</span></div>
+              <div class="kpi red"><label>Con Alonso</label><strong id="kdxPendienteAlonso">0</strong><span>Salida - retorno</span></div>
+              <div class="kpi amber"><label>Salidas clienta</label><strong id="kdxSalidaClienta">0</strong><span>Entregadas</span></div>
+              <div class="kpi blue"><label>Guías</label><strong id="kdxGuias">0</strong><span>Lotes creados</span></div>
+            </div>
+
+            <div class="filters">
+              <input id="searchKardex" placeholder="Buscar movimiento, guía, cliente, código..." />
+              <select id="filterKardexTipo"><option value="">Tipo movimiento</option></select>
+              <select id="filterKardexOrigen"><option value="">Origen</option></select>
+              <select id="filterKardexDestino"><option value="">Destino</option></select>
+              <select id="filterKardexEstado"><option value="">Estado</option></select>
+              <button class="secondary" id="clearKardex">Limpiar</button>
+            </div>
+
+            <div class="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Movimiento</th>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Guía</th>
+                    <th>Código</th>
+                    <th>Cliente</th>
+                    <th>Joya</th>
+                    <th>Cant.</th>
+                    <th>Piedra</th>
+                    <th>Origen</th>
+                    <th>Destino</th>
+                    <th>Entrega</th>
+                    <th>Recibe</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody id="kardexTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="cardHead">
+              <h3>Guías generadas</h3>
+              <span class="tag tagBlue" id="guidesCount">0</span>
+            </div>
+            <div class="alerts" id="guidesList"></div>
           </div>
         </div>
       </section>
@@ -964,6 +1028,9 @@ const CONFIG = {
 };
 
 let rows = [];
+let kardexRows = [];
+let guidesRows = [];
+let filteredKardexRows = [];
 let timelineRows = [];
 let tableRows = [];
 let selected = new Map();
@@ -999,6 +1066,8 @@ function gvizFetch() {
   }
 
   setApiMode("Publicación");
+  kardexRows = [];
+  guidesRows = [];
   return publishedGvizByGid()
     .catch(err1 => {
       console.warn("GViz publicado por gid falló:", err1);
@@ -1057,6 +1126,8 @@ function appsScriptJsonpFetch(url) {
       if(!Array.isArray(payload.rows)) {
         throw new Error("Apps Script no devolvió una matriz rows.");
       }
+      kardexRows = Array.isArray(payload.kardex) ? payload.kardex.map(enrichKardex) : [];
+      guidesRows = Array.isArray(payload.guides) ? payload.guides.map(enrichGuide) : [];
       return payload.rows.map(enrich);
     });
 }
@@ -1198,6 +1269,34 @@ function enrich(r) {
   };
 }
 
+
+function enrichKardex(r) {
+  const fecha = parseDate(r.FECHA_MOVIMIENTO, r.FECHA_MOVIMIENTO__raw);
+  const qty = Number(String(r.CANTIDAD || "0").replace(",", ".")) || 0;
+  return {
+    ...r,
+    _fecha: fecha,
+    _qty: qty,
+    _key: String(r.MOVIMIENTO_ID || r.GUIA_REMISION || r.ITEM_ID_AUTO || Math.random()).trim()
+  };
+}
+
+function enrichGuide(r) {
+  const fecha = parseDate(r.FECHA_GUIA, r.FECHA_GUIA__raw);
+  const piezas = Number(String(r.TOTAL_PIEZAS || "0").replace(",", ".")) || 0;
+  return {
+    ...r,
+    _fecha: fecha,
+    _piezas: piezas
+  };
+}
+
+function sumKardex(type) {
+  return kardexRows
+    .filter(r => String(r.TIPO_MOVIMIENTO || "").trim() === type)
+    .reduce((s,r) => s + (r._qty || 0), 0);
+}
+
 function load() {
   $("loader").classList.add("show");
   $("errorBox").classList.remove("show");
@@ -1238,6 +1337,10 @@ function buildFilters() {
   setOptions("filterTableSede","Sede",sedes);
   setOptions("filterPiedra","Piedra",piedras);
   setOptions("filterTablePiedra","Piedra",piedras);
+  setOptions("filterKardexTipo","Tipo movimiento",unique(kardexRows.map(r=>r.TIPO_MOVIMIENTO)));
+  setOptions("filterKardexOrigen","Origen",unique(kardexRows.map(r=>r.SEDE_ORIGEN)));
+  setOptions("filterKardexDestino","Destino",unique(kardexRows.map(r=>r.SEDE_DESTINO)));
+  setOptions("filterKardexEstado","Estado",unique(kardexRows.map(r=>r.ESTADO_MOVIMIENTO)));
 }
 
 function textSearch(r,q) {
@@ -1283,6 +1386,29 @@ function applyTable() {
   });
 }
 
+function applyKardex() {
+  const q = $("searchKardex") ? $("searchKardex").value.trim().toLowerCase() : "";
+  const tipo = $("filterKardexTipo") ? $("filterKardexTipo").value : "";
+  const origen = $("filterKardexOrigen") ? $("filterKardexOrigen").value : "";
+  const destino = $("filterKardexDestino") ? $("filterKardexDestino").value : "";
+  const estado = $("filterKardexEstado") ? $("filterKardexEstado").value : "";
+
+  filteredKardexRows = kardexRows.filter(r => {
+    const hay = [
+      r.MOVIMIENTO_ID, r.GUIA_REMISION, r.ITEM_ID_AUTO, r.CODIGO_ORIGINAL, r.CLIENTE,
+      r.TIPO_JOYA, r.PIEDRA, r.TRABAJO_SOLICITADO, r.SEDE_ORIGEN, r.SEDE_DESTINO,
+      r.RESPONSABLE_ENTREGA, r.RESPONSABLE_RECIBE
+    ].join(" ").toLowerCase();
+
+    if(q && !hay.includes(q)) return false;
+    if(tipo && r.TIPO_MOVIMIENTO !== tipo) return false;
+    if(origen && r.SEDE_ORIGEN !== origen) return false;
+    if(destino && r.SEDE_DESTINO !== destino) return false;
+    if(estado && r.ESTADO_MOVIMIENTO !== estado) return false;
+    return true;
+  });
+}
+
 function renderAll() {
   const total = rows.length;
   const enviadas = rows.filter(r=>r._enviado).length;
@@ -1299,6 +1425,9 @@ function renderAll() {
   $("navAlonso").textContent = rows.filter(r=>r._conAlonso).length;
   $("navSolicitudes").textContent = rows.length;
   $("navSeleccionadas").textContent = selected.size;
+  if($("navKardex")) $("navKardex").textContent = kardexRows.length;
+  applyKardex();
+  renderKardex();
   $("selectedBadge").textContent = `${selected.size} seleccionadas`;
 
   renderTimeline();
@@ -1415,6 +1544,91 @@ function renderTable() {
   });
 }
 
+function renderKardex() {
+  const salida = sumKardex("SALIDA_A_ALONSO");
+  const retorno = sumKardex("RETORNO_DE_ALONSO");
+  const salidaClienta = sumKardex("SALIDA_A_CLIENTA");
+
+  if($("kdxSalidaAlonso")) $("kdxSalidaAlonso").textContent = salida;
+  if($("kdxRetornoAlonso")) $("kdxRetornoAlonso").textContent = retorno;
+  if($("kdxPendienteAlonso")) $("kdxPendienteAlonso").textContent = Math.max(salida - retorno, 0);
+  if($("kdxSalidaClienta")) $("kdxSalidaClienta").textContent = salidaClienta;
+  if($("kdxGuias")) $("kdxGuias").textContent = guidesRows.length;
+  if($("kardexCount")) $("kardexCount").textContent = `${filteredKardexRows.length} movimientos`;
+  if($("guidesCount")) $("guidesCount").textContent = guidesRows.length;
+
+  renderKardexTable();
+  renderGuidesList();
+}
+
+function renderKardexTable() {
+  const body = $("kardexTableBody");
+  if(!body) return;
+  if(!filteredKardexRows.length) {
+    body.innerHTML = `<tr><td colspan="14"><div class="empty">Sin movimientos registrados todavía. Al guardar una guía se generará la salida a Alonso automáticamente.</div></td></tr>`;
+    return;
+  }
+
+  const sorted = [...filteredKardexRows].sort((a,b) => (b._fecha || 0) - (a._fecha || 0));
+  body.innerHTML = sorted.map(r => `
+    <tr>
+      <td class="code">${esc(r.MOVIMIENTO_ID || "—")}</td>
+      <td>${fmt(r._fecha)}</td>
+      <td>${movementTag(r.TIPO_MOVIMIENTO)}</td>
+      <td>${esc(r.GUIA_REMISION || "—")}</td>
+      <td>${esc(r.ITEM_ID_AUTO || r.CODIGO_ORIGINAL || "—")}</td>
+      <td>${esc(r.CLIENTE || "—")}</td>
+      <td>${esc(r.TIPO_JOYA || "—")}</td>
+      <td>${esc(r.CANTIDAD || "0")}</td>
+      <td>${esc(r.PIEDRA || "—")}</td>
+      <td>${esc(r.SEDE_ORIGEN || "—")}</td>
+      <td>${esc(r.SEDE_DESTINO || "—")}</td>
+      <td>${esc(r.RESPONSABLE_ENTREGA || "—")}</td>
+      <td>${esc(r.RESPONSABLE_RECIBE || "—")}</td>
+      <td>${movementStatusTag(r.ESTADO_MOVIMIENTO)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderGuidesList() {
+  const box = $("guidesList");
+  if(!box) return;
+  if(!guidesRows.length) {
+    box.innerHTML = `<div class="empty">Aún no hay guías generadas desde el panel.</div>`;
+    return;
+  }
+
+  const sorted = [...guidesRows].sort((a,b) => (b._fecha || 0) - (a._fecha || 0));
+  box.innerHTML = sorted.slice(0,30).map(g => `
+    <div class="tlItem">
+      <div class="tlTop">
+        <div>
+          <b>${esc(g.GUIA_REMISION || "—")}</b><br>
+          <small>${fmt(g._fecha)} · ${esc(g.SEDE_SALIDA || "—")} → ${esc(g.DESTINO || "—")}</small>
+        </div>
+        <span class="tag tagBlue">${esc(g.TOTAL_PIEZAS || "0")} piezas</span>
+      </div>
+      <small>${esc(g.IDS_SOLICITUDES || "Sin detalle")}</small>
+    </div>
+  `).join("");
+}
+
+function movementTag(v) {
+  const s = String(v || "—");
+  if(s === "SALIDA_A_ALONSO") return `<span class="tag tagBlue">${esc(s)}</span>`;
+  if(s === "RETORNO_DE_ALONSO") return `<span class="tag tagGreen">${esc(s)}</span>`;
+  if(s === "SALIDA_A_CLIENTA") return `<span class="tag tagAmber">${esc(s)}</span>`;
+  if(s === "ANULACION") return `<span class="tag tagRed">${esc(s)}</span>`;
+  return `<span class="tag tagNeutral">${esc(s)}</span>`;
+}
+
+function movementStatusTag(v) {
+  const s = String(v || "—");
+  if(s === "CONFIRMADO" || s === "REGISTRADO") return `<span class="tag tagGreen">${esc(s)}</span>`;
+  if(s === "OBSERVADO") return `<span class="tag tagRed">${esc(s)}</span>`;
+  return `<span class="tag tagNeutral">${esc(s)}</span>`;
+}
+
 function renderGuidePickList() {
   const q = $("guideSearch").value.trim().toLowerCase();
   const list = rows.filter(r => !q || textSearch(r,q));
@@ -1507,6 +1721,33 @@ function notifyCritical() {
   });
 }
 
+
+function registerSelectedMovement(type) {
+  const items = [...selected.values()];
+  if(!items.length) {
+    toast("Sin solicitudes", "Selecciona una o más solicitudes.");
+    return;
+  }
+  if(!getApiUrl()) {
+    toast("Falta Apps Script", "Pega la URL /exec en Conexión API para registrar movimientos.");
+    return;
+  }
+
+  const payload = {
+    action: "registerMovement",
+    movementType: type,
+    ids: items.map(r => r.ITEM_ID_AUTO || r.CODIGO_ORIGINAL).filter(Boolean),
+    guideNumber: selectedGuideNumber()
+  };
+
+  jsonpWrite(getApiUrl(), payload)
+    .then(res => {
+      if(!res || !res.ok) throw new Error(res && res.error ? res.error : "No se pudo registrar.");
+      toast("Movimiento registrado", `${type}: ${res.updated || 0} fila(s) actualizadas.`);
+      return load();
+    })
+    .catch(err => toast("Error", err.message || "No se pudo registrar el movimiento."));
+}
 
 function selectedGuideNumber() {
   const n = $("guideNumber").textContent.trim();
@@ -1615,6 +1856,18 @@ function bind() {
     ["searchTimeline","filterEstado","filterSede","filterTiempo","filterPiedra"].forEach(id => $(id).value = "");
     applyTimeline(); renderAll();
   });
+  
+  ["searchKardex","filterKardexTipo","filterKardexOrigen","filterKardexDestino","filterKardexEstado"].forEach(id => {
+    const el = $(id);
+    if(!el) return;
+    el.addEventListener("input", () => { applyKardex(); renderKardex(); });
+    el.addEventListener("change", () => { applyKardex(); renderKardex(); });
+  });
+  if($("clearKardex")) $("clearKardex").addEventListener("click", () => {
+    ["searchKardex","filterKardexTipo","filterKardexOrigen","filterKardexDestino","filterKardexEstado"].forEach(id => $(id).value = "");
+    applyKardex(); renderKardex();
+  });
+
   $("clearTable").addEventListener("click", () => {
     ["searchTable","filterTableEstado","filterTableSede","filterTablePiedra","filterTableGuia"].forEach(id => $(id).value = "");
     applyTable(); renderAll();
@@ -1658,6 +1911,8 @@ function bind() {
     selected.clear();
     renderAll();
   });
+  if($("returnSelectedBtn")) $("returnSelectedBtn").addEventListener("click", () => registerSelectedMovement("RETORNO_DE_ALONSO"));
+  if($("clientSelectedBtn")) $("clientSelectedBtn").addEventListener("click", () => registerSelectedMovement("SALIDA_A_CLIENTA"));
 
   $("notifyBtn").addEventListener("click", async () => {
     if(!("Notification" in window)) {
